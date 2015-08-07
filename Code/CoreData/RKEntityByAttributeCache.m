@@ -399,7 +399,7 @@ static NSArray *RKCacheKeysForEntityFromAttributeValues(NSEntityDescription *ent
 
 - (void)didReceiveMemoryWarning:(NSNotification *)notification
 {
-    [self flush:nil];
+//    [self flush:nil];
 }
 
 @end
