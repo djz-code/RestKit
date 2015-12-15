@@ -90,6 +90,7 @@ static dispatch_queue_t RKInMemoryManagedObjectCacheCallbackQueue(void)
     NSParameterAssert(managedObjectContext);
     
     NSArray *attributes = [attributeValues allKeys];
+    [self.entityCache beginAccessing];
     if (! [self.entityCache isEntity:entity cachedByAttributes:attributes]) {
         RKLogInfo(@"Caching instances of Entity '%@' by attributes '%@'", entity.name, [attributes componentsJoinedByString:@", "]);
         dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -110,16 +111,12 @@ static dispatch_queue_t RKInMemoryManagedObjectCacheCallbackQueue(void)
             NSArray *objects = nil;
             objects = [managedObjectContext executeFetchRequest:fetchRequest error:&error];
             if (objects) {
-                [attributeCache addObjects:[NSSet setWithArray:objects] completion:^{
-                    dispatch_semaphore_signal(semaphore);
-                }];
+                [attributeCache addObjects:[NSSet setWithArray:objects]];
             } else {
                 RKLogError(@"Fetched pre-loading existing managed objects with error: %@", error);
-                dispatch_semaphore_signal(semaphore);
             }
         }];
-        dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-        
+
 #if !OS_OBJECT_USE_OBJC
         dispatch_release(semaphore);
 #endif
@@ -127,22 +124,24 @@ static dispatch_queue_t RKInMemoryManagedObjectCacheCallbackQueue(void)
         RKLogTrace(@"Cached %ld objects", (long)[attributeCache count]);
     }
     
-    return [self.entityCache objectsForEntity:entity withAttributeValues:attributeValues inContext:managedObjectContext];
+    NSSet *result = [self.entityCache objectsForEntity:entity withAttributeValues:attributeValues inContext:managedObjectContext];
+    [self.entityCache endAccessing];
+    return result;
 }
 
 - (void)didFetchObject:(NSManagedObject *)object
 {
-    [self.entityCache addObjects:[NSSet setWithObject:object] completion:nil];
+    [self.entityCache addObjects:[NSSet setWithObject:object]];
 }
 
 - (void)didCreateObject:(NSManagedObject *)object
 {
-    [self.entityCache addObjects:[NSSet setWithObject:object] completion:nil];
+    [self.entityCache addObjects:[NSSet setWithObject:object]];
 }
 
 - (void)didDeleteObject:(NSManagedObject *)object
 {
-    [self.entityCache removeObjects:[NSSet setWithObject:object] completion:nil];
+    [self.entityCache removeObjects:[NSSet setWithObject:object]];
 }
 
 - (void)handleManagedObjectContextDidChangeNotification:(NSNotification *)notification
@@ -156,9 +155,10 @@ static dispatch_queue_t RKInMemoryManagedObjectCacheCallbackQueue(void)
     
     NSMutableSet *objectsToAdd = [NSMutableSet setWithSet:insertedObjects];
     [objectsToAdd unionSet:updatedObjects];
-    
-    [self.entityCache addObjects:objectsToAdd completion:nil];
-    [self.entityCache removeObjects:deletedObjects completion:nil];
+    [objectsToAdd minusSet:deletedObjects];
+
+    [self.entityCache addObjects:objectsToAdd];
+    [self.entityCache removeObjects:deletedObjects];
 }
 
 @end

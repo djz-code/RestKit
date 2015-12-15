@@ -18,11 +18,18 @@
 //  limitations under the License.
 //
 
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#endif
+
 #import "RKEntityCache.h"
 #import "RKEntityByAttributeCache.h"
 
 @interface RKEntityCache ()
 @property (nonatomic, strong) NSMutableSet *attributeCaches;
+@property (nonatomic, strong) NSLock *accessLock;
+@property (nonatomic, strong) NSMutableArray *pendingFlushCompletionBlocks;
+@property (nonatomic) NSInteger accessCount;
 @end
 
 @implementation RKEntityCache
@@ -34,6 +41,15 @@
     if (self) {
         _managedObjectContext = context;
         _attributeCaches = [[NSMutableSet alloc] init];
+        _accessLock = [NSLock new];
+        _pendingFlushCompletionBlocks = [NSMutableArray new];
+
+#if TARGET_OS_IPHONE
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(didReceiveMemoryWarning:)
+                                                     name:UIApplicationDidReceiveMemoryWarningNotification
+                                                   object:nil];
+#endif
     }
 
     return self;
@@ -42,6 +58,11 @@
 - (instancetype)init
 {
     return [self initWithManagedObjectContext:nil];
+}
+
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)cacheObjectsForEntity:(NSEntityDescription *)entity byAttributes:(NSArray *)attributeNames completion:(void (^)(void))completion
@@ -119,64 +140,45 @@
     return [NSSet setWithSet:set];
 }
 
-- (void)waitForDispatchGroup:(dispatch_group_t)dispatchGroup withCompletionBlock:(void (^)(void))completion
-{
-    if (completion) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),^{
-            dispatch_group_wait(dispatchGroup, DISPATCH_TIME_FOREVER);
-#if !OS_OBJECT_USE_OBJC
-            dispatch_release(dispatchGroup);
-#endif
-            dispatch_async(self.callbackQueue ?: dispatch_get_main_queue(), completion);
-        });
-    }
-}
-
 - (void)flush:(void (^)(void))completion
 {
-    dispatch_group_t dispatchGroup = completion ? dispatch_group_create() : NULL;
-    for (RKEntityByAttributeCache *cache in self.attributeCaches) {
-        if (dispatchGroup) dispatch_group_enter(dispatchGroup);
-        [cache flush:^{
-            if (dispatchGroup) dispatch_group_leave(dispatchGroup);
-        }];
+    [_accessLock lock];
+    if (_accessCount == 0) {
+        [self flushNow];
+        [_accessLock unlock];
+
+        NSArray *blocks = [_pendingFlushCompletionBlocks copy];
+        [_pendingFlushCompletionBlocks removeAllObjects];
+        for (dispatch_block_t block in blocks) {
+            block();
+        }
+
+        if (completion) completion();
+    } else {
+        [_pendingFlushCompletionBlocks addObject:completion ?: ^{}];
+        [_accessLock unlock];
     }
-    if (dispatchGroup) [self waitForDispatchGroup:dispatchGroup withCompletionBlock:completion];
 }
 
-- (void)addObject:(NSManagedObject *)object completion:(void (^)(void))completion
+- (void)flushNow
+{
+    _attributeCaches = [[NSMutableSet alloc] init];
+}
+
+- (void)addObject:(NSManagedObject *)object
 {
     NSAssert(object, @"Cannot add a nil object to the cache");
-    dispatch_group_t dispatchGroup = completion ? dispatch_group_create() : NULL;
-    NSArray *attributeCaches = [self attributeCachesForEntity:object.entity];
-    NSSet *objects = [NSSet setWithObject:object];
-    for (RKEntityByAttributeCache *cache in attributeCaches) {
-        if (dispatchGroup) dispatch_group_enter(dispatchGroup);
-        [cache addObjects:objects completion:^{
-            if (dispatchGroup) dispatch_group_leave(dispatchGroup);
-        }];
-    }    
-    if (dispatchGroup) [self waitForDispatchGroup:dispatchGroup withCompletionBlock:completion];
+    [self addObjects:[NSSet setWithObject:object]];
 }
 
-- (void)removeObject:(NSManagedObject *)object completion:(void (^)(void))completion
+- (void)removeObject:(NSManagedObject *)object
 {
     NSAssert(object, @"Cannot remove a nil object from the cache");
-    NSArray *attributeCaches = [self attributeCachesForEntity:object.entity];
-    NSSet *objects = [NSSet setWithObject:object];
-    dispatch_group_t dispatchGroup = completion ? dispatch_group_create() : NULL;
-    for (RKEntityByAttributeCache *cache in attributeCaches) {
-        if (dispatchGroup) dispatch_group_enter(dispatchGroup);
-        [cache removeObjects:objects completion:^{
-            if (dispatchGroup) dispatch_group_leave(dispatchGroup);
-        }];
-    }
-    if (dispatchGroup) [self waitForDispatchGroup:dispatchGroup withCompletionBlock:completion];
+    [self removeObjects:[NSSet setWithObject:object]];
 }
 
-- (void)addObjects:(NSSet *)objects completion:(void (^)(void))completion
+- (void)addObjects:(NSSet *)objects
 {
-    dispatch_group_t dispatchGroup = completion ? dispatch_group_create() : NULL;
     NSSet *distinctEntities = [objects valueForKeyPath:@"entity"];
     for (NSEntityDescription *entity in distinctEntities) {
         NSArray *attributeCaches = [self attributeCachesForEntity:entity];
@@ -186,19 +188,15 @@
                 if ([managedObject.entity isEqual:entity]) [objectsToAdd addObject:managedObject];
             }
             for (RKEntityByAttributeCache *cache in attributeCaches) {
-                if (dispatchGroup) dispatch_group_enter(dispatchGroup);
-                [cache addObjects:objectsToAdd completion:^{
-                    if (dispatchGroup) dispatch_group_leave(dispatchGroup);
-                }];
+                [cache addObjects:objectsToAdd];
             }
         }
     }
-    if (dispatchGroup) [self waitForDispatchGroup:dispatchGroup withCompletionBlock:completion];
+
 }
 
-- (void)removeObjects:(NSSet *)objects completion:(void (^)(void))completion
+- (void)removeObjects:(NSSet *)objects
 {
-    dispatch_group_t dispatchGroup = completion ? dispatch_group_create() : NULL;
     NSSet *distinctEntities = [objects valueForKeyPath:@"entity"];
     for (NSEntityDescription *entity in distinctEntities) {
         NSArray *attributeCaches = [self attributeCachesForEntity:entity];
@@ -208,14 +206,11 @@
                 if ([managedObject.entity isEqual:entity]) [objectsToRemove addObject:managedObject];
             }
             for (RKEntityByAttributeCache *cache in attributeCaches) {
-                if (dispatchGroup) dispatch_group_enter(dispatchGroup);
-                [cache removeObjects:objectsToRemove completion:^{
-                    if (dispatchGroup) dispatch_group_leave(dispatchGroup);
-                }];
+                [cache removeObjects:objectsToRemove];
             }
         }
     }
-    if (dispatchGroup) [self waitForDispatchGroup:dispatchGroup withCompletionBlock:completion];
+
 }
 
 - (BOOL)containsObject:(NSManagedObject *)managedObject
@@ -225,6 +220,36 @@
     }
     
     return NO;
+}
+
+- (void)beginAccessing
+{
+    [_accessLock lock];
+    _accessCount += 1;
+    [_accessLock unlock];
+}
+
+- (void)endAccessing
+{
+    [_accessLock lock];
+    _accessCount -= 1;
+    if (_accessCount == 0 && _pendingFlushCompletionBlocks.count > 0) {
+        [self flushNow];
+        [_accessLock unlock];
+
+        NSArray *blocks = [_pendingFlushCompletionBlocks copy];
+        [_pendingFlushCompletionBlocks removeAllObjects];
+        for (dispatch_block_t block in blocks) {
+            block();
+        }
+    } else {
+        [_accessLock unlock];
+    }
+}
+
+- (void)didReceiveMemoryWarning:(NSNotification *)notification
+{
+    [self flush:nil];
 }
 
 @end

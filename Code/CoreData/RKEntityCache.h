@@ -137,15 +137,14 @@
  @param objects The set of objects to add to the appropriate entity attribute caches.
  @param completion An optional block to be executed when the object addition has completed.
  */
-- (void)addObjects:(NSSet *)objects completion:(void (^)(void))completion;
-
+- (void)addObjects:(NSSet *)objects;
 /**
  Removes the given set of objects from all entity attribute caches for the object's entity contained within the receiver.
 
  @param objects The set of objects to remove from the appropriate entity attribute caches.
  @param completion An optional block to be executed when the object removal has completed.
  */
-- (void)removeObjects:(NSSet *)objects completion:(void (^)(void))completion;
+- (void)removeObjects:(NSSet *)objects;
 
 /**
  Returns a Boolean value that indicates if the receiver contains the given object in any of its attribute caches.
@@ -155,10 +154,28 @@
  */
 - (BOOL)containsObject:(NSManagedObject *)managedObject;
 
+/**
+ Call this before beginning a sequence of operations that require the cache not to be flushed.
+ 
+ This is used by RKInMemoryManagedObjectCache to workaround https://github.com/RestKit/RestKit/issues/1613 .
+ 
+ @see endAccessing
+ */
+- (void)beginAccessing;
+
+/**
+ Call this after completing a sequence of operations that require the cache not to be flushed.
+
+ This is used by RKInMemoryManagedObjectCache to workaround https://github.com/RestKit/RestKit/issues/1613 .
+
+ @see beginAccessing
+ */
+- (void)endAccessing;
+
 @end
 
 // Deprecated in v0.20.1
 @interface RKEntityCache (Deprecations)
-- (void)addObject:(NSManagedObject *)object DEPRECATED_ATTRIBUTE; // use `addObjects:completion:`
-- (void)removeObject:(NSManagedObject *)object DEPRECATED_ATTRIBUTE; // use `removeObjects:completion:`
+- (void)addObject:(NSManagedObject *)object DEPRECATED_ATTRIBUTE; // use `addObjects:`
+- (void)removeObject:(NSManagedObject *)object DEPRECATED_ATTRIBUTE; // use `removeObjects:`
 @end

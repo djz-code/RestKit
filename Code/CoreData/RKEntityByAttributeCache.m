@@ -18,10 +18,6 @@
 //  limitations under the License.
 //
 
-#if TARGET_OS_IPHONE
-#import <UIKit/UIKit.h>
-#endif
-
 #import "RKEntityByAttributeCache.h"
 #import "RKLog.h"
 #import "RKPropertyInspector.h"
@@ -105,13 +101,6 @@ static NSArray *RKCacheKeysForEntityFromAttributeValues(NSEntityDescription *ent
         _managedObjectContext = context;
         NSString *queueName = [[NSString alloc] initWithFormat:@"%@.%p", @"org.restkit.core-data.entity-by-attribute-cache", self];
         self.queue = dispatch_queue_create([queueName UTF8String], DISPATCH_QUEUE_CONCURRENT);        
-
-#if TARGET_OS_IPHONE
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(didReceiveMemoryWarning:)
-                                                     name:UIApplicationDidReceiveMemoryWarningNotification
-                                                   object:nil];
-#endif
     }
 
     return self;
@@ -119,8 +108,6 @@ static NSArray *RKCacheKeysForEntityFromAttributeValues(NSEntityDescription *ent
 
 - (void)dealloc
 {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    
 #if !OS_OBJECT_USE_OBJC
     dispatch_release(_queue);
     _queue = NULL;
@@ -189,15 +176,6 @@ static NSArray *RKCacheKeysForEntityFromAttributeValues(NSEntityDescription *ent
      }];
 }
 
-- (void)flush:(void (^)(void))completion
-{
-    dispatch_barrier_async(self.queue, ^{
-        RKLogDebug(@"Flushing entity cache for Entity '%@' by attributes '%@'", self.entity.name, self.attributes);
-        self.cacheKeysToObjectIDs = nil;
-        if (completion) dispatch_async(self.callbackQueue ?: dispatch_get_main_queue(), completion);
-    });
-}
-
 - (BOOL)isLoaded
 {
     __block BOOL isLoaded;
@@ -211,15 +189,16 @@ static NSArray *RKCacheKeysForEntityFromAttributeValues(NSEntityDescription *ent
 {
     /**
      NOTE:
-
+     
      We use `existingObjectWithID:` as opposed to `objectWithID:` as `objectWithID:` can return us a fault
-     that will raise an exception when fired. `existingObjectWithID:error:` will return nil if the ID has been
-     deleted. `objectRegisteredForID:` is also an acceptable approach.
+     that will raise an exception when fired. `objectRegisteredForID:` is also an acceptable approach.
      */
     __block NSError *error = nil;
     __block NSManagedObject *object;
     [context performBlockAndWait:^{
         object = [context existingObjectWithID:objectID error:&error];
+        // Don't return the object if it has been deleted.
+        if ([object isDeleted]) object = nil;
     }];
     if (! object) {
         // Referential integrity errors often indicates that the temporary objectID does not exist in the specified context
@@ -313,73 +292,51 @@ static NSArray *RKCacheKeysForEntityFromAttributeValues(NSEntityDescription *ent
     }
 }
 
-- (void)addObjects:(NSSet *)managedObjects completion:(void (^)(void))completion
+- (void)addObjects:(NSSet *)managedObjects
 {
     if ([managedObjects count] == 0) {
-        if (completion) dispatch_async(self.callbackQueue ?: dispatch_get_main_queue(), completion);
         return;
     }
-    __block NSEntityDescription *entity;
-    __block NSDictionary *attributeValues;
-    __block NSManagedObjectID *objectID;
     NSManagedObjectContext *managedObjectContext = [[managedObjects anyObject] managedObjectContext];
     [managedObjectContext performBlockAndWait:^{
         NSMutableDictionary *newObjectIDsToAttributeValues = [NSMutableDictionary dictionaryWithCapacity:[managedObjects count]];
         for (NSManagedObject *managedObject in managedObjects) {
-            entity = managedObject.entity;
-            objectID = [managedObject objectID];
-            attributeValues = [managedObject dictionaryWithValuesForKeys:self.attributes];
-            
+            NSEntityDescription *entity = managedObject.entity;
+            NSDictionary *attributeValues = [managedObject dictionaryWithValuesForKeys:self.attributes];
+
             NSAssert([entity isKindOfEntity:self.entity], @"Cannot add object with entity '%@' to cache for entity of '%@'", [entity name], [self.entity name]);
-            newObjectIDsToAttributeValues[objectID] = attributeValues;
+            newObjectIDsToAttributeValues[managedObject.objectID] = attributeValues;
         }
-        
-        if ([newObjectIDsToAttributeValues count]) {
-            dispatch_barrier_async(self.queue, ^{
-                [newObjectIDsToAttributeValues enumerateKeysAndObjectsUsingBlock:^(NSManagedObjectID *objectID, NSDictionary *attributeValues, BOOL *stop) {
-                    [self cacheObjectID:objectID forAttributeValues:attributeValues];
-                }];
-                
-                if (completion) dispatch_async(self.callbackQueue ?: dispatch_get_main_queue(), completion);
-            });
-        } else {
-            if (completion) dispatch_async(self.callbackQueue ?: dispatch_get_main_queue(), completion);
-        }
+
+        dispatch_barrier_sync(self.queue, ^{
+            [newObjectIDsToAttributeValues enumerateKeysAndObjectsUsingBlock:^(NSManagedObjectID *objectID, NSDictionary *attributeValues, BOOL *stop) {
+                [self cacheObjectID:objectID forAttributeValues:attributeValues];
+            }];
+        });
     }];
 }
 
-- (void)removeObjects:(NSSet *)managedObjects completion:(void (^)(void))completion
+- (void)removeObjects:(NSSet *)managedObjects
 {
     if ([managedObjects count] == 0) {
-        if (completion) dispatch_async(self.callbackQueue ?: dispatch_get_main_queue(), completion);
         return;
     }
-    __block NSEntityDescription *entity;
-    __block NSDictionary *attributeValues;
-    __block NSManagedObjectID *objectID;
     NSManagedObjectContext *managedObjectContext = [[managedObjects anyObject] managedObjectContext];
-    [managedObjectContext performBlock:^{
+    [managedObjectContext performBlockAndWait:^{
         NSMutableDictionary *deletedObjectIDsToAttributeValues = [NSMutableDictionary dictionaryWithCapacity:[managedObjects count]];
         for (NSManagedObject *managedObject in managedObjects) {
-            entity = managedObject.entity;
-            objectID = [managedObject objectID];
-            attributeValues = [managedObject dictionaryWithValuesForKeys:self.attributes];
-            
+            NSEntityDescription *entity = managedObject.entity;
+            NSDictionary *attributeValues = [managedObject dictionaryWithValuesForKeys:self.attributes];
+
             NSAssert([entity isKindOfEntity:self.entity], @"Cannot remove object with entity '%@' from cache for entity of '%@'", [entity name], [self.entity name]);
-            deletedObjectIDsToAttributeValues[objectID] = attributeValues;
+            deletedObjectIDsToAttributeValues[managedObject.objectID] = attributeValues;
         }
-        
-        if ([deletedObjectIDsToAttributeValues count]) {
-            dispatch_barrier_async(self.queue, ^{
-                [deletedObjectIDsToAttributeValues enumerateKeysAndObjectsUsingBlock:^(NSManagedObjectID *objectID, NSDictionary *attributeValues, BOOL *stop) {
-                    [self deleteObjectID:objectID forAttributeValues:attributeValues];
-                }];
-                
-                if (completion) dispatch_async(self.callbackQueue ?: dispatch_get_main_queue(), completion);
-            });
-        } else {
-            if (completion) dispatch_async(self.callbackQueue ?: dispatch_get_main_queue(), completion);
-        }
+
+        dispatch_barrier_sync(self.queue, ^{
+            [deletedObjectIDsToAttributeValues enumerateKeysAndObjectsUsingBlock:^(NSManagedObjectID *objectID, NSDictionary *attributeValues, BOOL *stop) {
+                [self deleteObjectID:objectID forAttributeValues:attributeValues];
+            }];
+        });
     }];
 }
 
@@ -397,11 +354,6 @@ static NSArray *RKCacheKeysForEntityFromAttributeValues(NSEntityDescription *ent
     return [allObjectIDs containsObject:object.objectID];
 }
 
-- (void)didReceiveMemoryWarning:(NSNotification *)notification
-{
-//    [self flush:nil];
-}
-
 @end
 
 @implementation RKEntityByAttributeCache (Deprecations)
@@ -414,19 +366,14 @@ static NSArray *RKCacheKeysForEntityFromAttributeValues(NSEntityDescription *ent
     [self load:nil];
 }
 
-- (void)flush DEPRECATED_ATTRIBUTE
-{
-    [self flush:nil];
-}
-
 - (void)addObject:(NSManagedObject *)object DEPRECATED_ATTRIBUTE
 {
-    [self addObjects:[NSSet setWithObject:object] completion:nil];
+    [self addObjects:[NSSet setWithObject:object]];
 }
 
 - (void)removeObject:(NSManagedObject *)object DEPRECATED_ATTRIBUTE
 {
-    [self removeObjects:[NSSet setWithObject:object] completion:nil];
+    [self removeObjects:[NSSet setWithObject:object]];
 }
 
 - (void)setMonitorsContextForChanges:(BOOL)monitorsContextForChanges DEPRECATED_ATTRIBUTE

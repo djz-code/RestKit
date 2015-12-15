@@ -75,7 +75,7 @@
 @property (nonatomic, assign) dispatch_queue_t callbackQueue;
 
 ///-------------------------------------
-/// @name Loading and Flushing the Cache
+/// @name Loading the Cache
 ///-------------------------------------
 
 /**
@@ -86,13 +86,6 @@
  @param completion A block to execute when the cache has finished loading.
  */
 - (void)load:(void (^)(void))completion;
-
-/**
- Flushes the cache by releasing all cache attribute value to managed object ID associations.
- 
- @param completion A block to execute when the cache has finished flushing.
- */
-- (void)flush:(void (^)(void))completion;
 
 ///-----------------------------
 /// @name Inspecting Cache State
@@ -164,24 +157,24 @@
 ///------------------------------
 
 /**
- Asynchronously adds a managed object to the cache.
+ Adds a managed object to the cache.
 
- The object must be an instance of the cached entity.
+ The objects must be instances of the cached entity.
 
  @param managedObjects The managed object to add to the cache.
  @param completion An optional block to execute once the object has been added to the cache.
  */
-- (void)addObjects:(NSSet *)managedObjects completion:(void (^)(void))completion;
+- (void)addObjects:(NSSet *)managedObjects;
 
 /**
- Asynchronously removes a managed object from the cache.
+ Removes a managed object from the cache.
 
- The object must be an instance of the cached entity.
+ The objects must be an instances of the cached entity.
 
  @param managedObjects The managed object to remove from the cache.
  @param completion An optional block to execute once the object has been removed from the cache.
  */
-- (void)removeObjects:(NSSet *)managedObjects completion:(void (^)(void))completion;
+- (void)removeObjects:(NSSet *)managedObjects;
 
 @end
 
@@ -192,7 +185,6 @@
  */
 @interface RKEntityByAttributeCache (Deprecations)
 - (void)load DEPRECATED_ATTRIBUTE; // use `load:`
-- (void)flush DEPRECATED_ATTRIBUTE; // use `flush:`
 - (void)addObject:(NSManagedObject *)object DEPRECATED_ATTRIBUTE; // use `addObjects:completion:`
 - (void)removeObject:(NSManagedObject *)object DEPRECATED_ATTRIBUTE; // use `removeObjects:completion:`
 @property (nonatomic, assign) BOOL monitorsContextForChanges DEPRECATED_ATTRIBUTE; // No longer applies. Consumers are responsible for context change monitoring. Handled by `RKInMemoryManagedObjectCache`
