@@ -548,7 +548,10 @@ static NSString *RKStringDescribingURLResponseWithData(NSURLResponse *response, 
             [weakSelf.stateMachine finish];
         }];
     } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-        RKLogError(@"Object request failed: Underlying HTTP request operation failed with error: %@", weakSelf.HTTPRequestOperation.error);
+        // Don't log cancels as errors
+        if (error.code != -999) {
+            RKLogError(@"Object request failed: Underlying HTTP request operation failed with error: %@", weakSelf.HTTPRequestOperation.error);
+        }
         weakSelf.error = weakSelf.HTTPRequestOperation.error;
         [weakSelf.stateMachine finish];
     }];
