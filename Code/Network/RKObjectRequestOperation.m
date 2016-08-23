@@ -210,7 +210,7 @@ static void *RKOperationFinishDate = &RKOperationFinishDate;
             RKLogDebug(@"response.body=%@", HTTPRequestOperation.responseString);
         } else {
             if (objectRequestOperation.error.code == NSURLErrorCancelled) {
-                RKLogError(@"%@ '%@' %@: Cancelled", [HTTPRequestOperation.request HTTPMethod], [[HTTPRequestOperation.request URL] absoluteString], statusCodeAndElapsedTime);
+                RKLogInfo(@"%@ '%@' %@: Cancelled", [HTTPRequestOperation.request HTTPMethod], [[HTTPRequestOperation.request URL] absoluteString], statusCodeAndElapsedTime);
             } else {
                 RKLogError(@"%@ '%@' %@: %@", [HTTPRequestOperation.request HTTPMethod], [[HTTPRequestOperation.request URL] absoluteString], statusCodeAndElapsedTime, objectRequestOperation.error);
             }
@@ -548,10 +548,6 @@ static NSString *RKStringDescribingURLResponseWithData(NSURLResponse *response, 
             [weakSelf.stateMachine finish];
         }];
     } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-        // Don't log cancels as errors
-        if (error.code != -999) {
-            RKLogError(@"Object request failed: Underlying HTTP request operation failed with error: %@", weakSelf.HTTPRequestOperation.error);
-        }
         weakSelf.error = weakSelf.HTTPRequestOperation.error;
         [weakSelf.stateMachine finish];
     }];
