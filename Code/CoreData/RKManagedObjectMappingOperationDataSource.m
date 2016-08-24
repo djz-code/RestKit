@@ -402,7 +402,8 @@ extern NSString * const RKObjectMappingNestingAttributeKeyName;
     __block BOOL success;
     __block NSError *error = nil;
     [self.managedObjectContext performBlockAndWait:^{
-        success = [self.managedObjectContext obtainPermanentIDsForObjects:[objectsToAdd allObjects] error:&error];
+        NSArray<NSManagedObject *> *objects = [objectsToAdd allObjects];
+        success = [self.managedObjectContext obtainPermanentIDsForObjects:objects error:&error];
     }];
     
     if (! success) {
