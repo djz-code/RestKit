@@ -223,19 +223,19 @@ static char RKManagedObjectContextChangeMergingObserverAssociationKey;
      */    
     NSPersistentStore *persistentStore = [self.persistentStoreCoordinator addPersistentStoreWithType:NSSQLiteStoreType configuration:nil URL:storeURL options:options error:error];
     if (! persistentStore) return nil;
-    if (! [self.persistentStoreCoordinator removePersistentStore:persistentStore error:error]) return nil;
+//    if (! [self.persistentStoreCoordinator removePersistentStore:persistentStore error:error]) return nil;
+//
+//    NSDictionary *seedOptions = nil;
+//    if (nilOrOptions) {
+//        NSMutableDictionary *mutableOptions = [nilOrOptions mutableCopy];
+//        mutableOptions[RKSQLitePersistentStoreSeedDatabasePathOption] = (seedPath ?: [NSNull null]);
+//        seedOptions = mutableOptions;
+//    } else {
+//        seedOptions = @{ RKSQLitePersistentStoreSeedDatabasePathOption: (seedPath ?: [NSNull null]) };
+//    }
+//    persistentStore = [self.persistentStoreCoordinator addPersistentStoreWithType:NSSQLiteStoreType configuration:nilOrConfigurationName URL:storeURL options:seedOptions error:error];
+//    if (! persistentStore) return nil;
 
-    NSDictionary *seedOptions = nil;
-    if (nilOrOptions) {
-        NSMutableDictionary *mutableOptions = [nilOrOptions mutableCopy];
-        mutableOptions[RKSQLitePersistentStoreSeedDatabasePathOption] = (seedPath ?: [NSNull null]);
-        seedOptions = mutableOptions;
-    } else {
-        seedOptions = @{ RKSQLitePersistentStoreSeedDatabasePathOption: (seedPath ?: [NSNull null]) };
-    }
-    persistentStore = [self.persistentStoreCoordinator addPersistentStoreWithType:NSSQLiteStoreType configuration:nilOrConfigurationName URL:storeURL options:seedOptions error:error];
-    if (! persistentStore) return nil;
-    
     // Exclude the SQLite database from iCloud Backups to conform to the iCloud Data Storage Guidelines
     RKSetExcludeFromBackupAttributeForItemAtPath(storePath);
     
