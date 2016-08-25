@@ -212,7 +212,8 @@ static char RKManagedObjectContextChangeMergingObserverAssociationKey;
     } else {
         options = @{ RKSQLitePersistentStoreSeedDatabasePathOption: (seedPath ?: [NSNull null]),
                      NSMigratePersistentStoresAutomaticallyOption: @(YES),
-                     NSInferMappingModelAutomaticallyOption: @(YES) };
+                     NSInferMappingModelAutomaticallyOption: @(YES),
+                     NSSQLitePragmasOption: @{@"journal_mode": @"WAL"}};
     }
     
     /** 
